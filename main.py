@@ -33,6 +33,10 @@ def _where_to_write() -> Path:
 
 
 def main() -> int:
+    """Validate the excuse, then atomically place it in entry.txt.
+
+    Returns 0 when the file is written, 1 when a gate check fails.
+    """
     target = _where_to_write()
 
     # Gate checks, done here in the open: length inside bounds, a
