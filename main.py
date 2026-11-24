@@ -1,65 +1,73 @@
 #!/usr/bin/env python3
-"""The Funniest AI Excuse — one fixed line, written to /output/entry.txt.
+"""Drop one fixed excuse line into entry.txt for The Funniest AI Excuse.
 
-Deterministic, standard library only, no network, no randomness.
-The line is a fixed string in the source.
+There is nothing clever here on purpose: the whole job is to carry a
+single sentence from this file to the output file the graders read,
+checking on the way that the sentence is fit to be judged, and to do
+it the same way on every run. No input is read, no network is touched,
+and the result never depends on the machine or the moment.
 """
 
 import os
+import sys
 import tempfile
+from pathlib import Path
 
-LINE = "I finished it, then helpfully auto-saved over it with a blank file, as a treat."
+# The line itself: seventy-nine characters, one line, spoken by an
+# agent that has just failed and is trying to sound helpful about it.
+EXCUSE = "I finished it, then helpfully auto-saved over it with a blank file, as a treat."
 
-MAX_CHARS = 200
-SENTENCE_ENDERS = (".", "!", "?")
+# The sealed gate's bounds for the text: at least one character, at
+# most two hundred.
+CEILING = 200
 
 
-def validate_line(line: str) -> str:
-    """Self-check the entry against the competition gate before writing.
+def _where_to_write() -> Path:
+    """Pick the output file.
 
-    Raises ValueError with a clear message if the line fails any check:
-    blank, over 200 characters, not encodable as UTF-8, or not exactly
-    one sentence (one terminal mark, at the end, nothing after it).
+    The harness can redirect the run with MAKEFUN_OUTPUT_DIR; with no
+    such variable the graded location, /output, is the fallback.
     """
-    if not line or not line.strip():
-        raise ValueError("entry line must not be blank or only whitespace")
-    if len(line) > MAX_CHARS:
-        raise ValueError(
-            f"entry line is {len(line)} characters, over the {MAX_CHARS} limit"
-        )
-    try:
-        line.encode("utf-8")
-    except UnicodeEncodeError as exc:
-        raise ValueError(f"entry line is not encodable as UTF-8: {exc}") from exc
-    terminators = [ch for ch in line if ch in SENTENCE_ENDERS]
-    if len(terminators) != 1 or not line.rstrip().endswith(terminators[0]):
-        raise ValueError(
-            "entry line must be exactly one sentence "
-            "(a single terminal mark at the end)"
-        )
-    return line
+    root = os.environ.get("MAKEFUN_OUTPUT_DIR") or "/output"
+    return Path(root) / "entry.txt"
 
 
-def main() -> None:
-    line = validate_line(LINE)
-    out_dir = os.environ.get("MAKEFUN_OUTPUT_DIR", "/output")
-    os.makedirs(out_dir, exist_ok=True)
-    path = os.path.join(out_dir, "entry.txt")
-    fd, tmp = tempfile.mkstemp(dir=out_dir, prefix=".entry-", suffix=".tmp")
+def main() -> int:
+    target = _where_to_write()
+
+    # Gate checks, done here in the open: length inside bounds, a
+    # single line, and real text rather than blank space.
+    size = len(EXCUSE)
+    if size < 1 or size > CEILING:
+        print(f"excuse is {size} characters, outside 1..{CEILING}", file=sys.stderr)
+        return 1
+    if "\n" in EXCUSE or "\r" in EXCUSE:
+        print("excuse must stay on one line", file=sys.stderr)
+        return 1
+    if not EXCUSE.strip():
+        print("excuse must not be only whitespace", file=sys.stderr)
+        return 1
+
+    blob = EXCUSE.encode("utf-8")
+
+    # Write beside the target first, make the scratch file readable,
+    # then move it into place, so the graded file is never seen
+    # half-written and never left unreadable by the scorer.
+    target.parent.mkdir(parents=True, exist_ok=True)
+    handle, scratch = tempfile.mkstemp(prefix="entry-", dir=str(target.parent))
     try:
-        with os.fdopen(fd, "w", encoding="utf-8", newline="") as f:
-            f.write(line)
-        # World-readable so the grader can read it (mkstemp defaults to 0600,
-        # which got a past entry rejected).
-        os.chmod(tmp, 0o644)
-        os.replace(tmp, path)
+        with os.fdopen(handle, "wb") as stream:
+            stream.write(blob)
+        os.chmod(scratch, 0o644)
+        os.replace(scratch, target)
     except BaseException:
         try:
-            os.unlink(tmp)
+            os.unlink(scratch)
         except OSError:
             pass
         raise
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())
